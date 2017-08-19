@@ -26,7 +26,7 @@ def load_embeddings(embeddings_file_path):
 
 	return embeddings_index
 
-def generate_text_labels(texts_file_path,chunk_size = 1000):
+def parse_input(texts_file_path,chunk_size = 1000):
 
 	chunks = pd.read_csv(texts_file_path, sep='\t', names=['query', 'url','table','label'],chunksize = chunk_size)
 	for chunk in chunks:
@@ -216,8 +216,9 @@ def get_AGI_encoder_vector(queries, url="http://agi-encoder:5001/encoder", batch
 def chunks(l, n):
     """Yield successive n-sized chunks from l."""
     for i in range(0, len(l), n):
-    	if (i+n) < len(l):
-        	yield l[i:i + n]
+    	if (i+n) <= len(l):
+			print 'chunk range:[%d,%d]' % (i, i+n)
+			yield l[i:i + n]
 
 def retrieve_AGI_vectors(input_file_name, output_file_name, input_headers):
 

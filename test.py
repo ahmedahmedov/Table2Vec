@@ -17,6 +17,7 @@ def test_it2(iter):
 		new_list = [item] * 5
 		yield new_list
 
-test2 = test_it(test)
-for item in test_it2(test):
-	print item
+test2 = zip(test_it(test),test_it(test))
+
+for item in test2:
+	print item[0]
