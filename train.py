@@ -13,12 +13,15 @@ import sys
 
 ################################# Parameter Initilization############################
 #####################################################################################
+
 BASE_DIR = 'Data'
 EMBEDDING_BASE = '/home/max/DeepLearning/DeepTables/private/Keras/WordEmbeddings'
 MODEL_BASE = 'Models_Q_Tables_2Mil'
 tmp_dir = 'tmp/'
 GLOVE_DIR = EMBEDDING_BASE + '/Glove/'
-TEXT_DATA = BASE_DIR + '/' + 'Q_Tables_2Mil.tsv'
+TRAIN_DATA = BASE_DIR + '/' + 'Q_Tables_2Mil.tsv'
+DEV_DATA = BASE_DIR + '/' +'Q_T_Dev.tsv'
+### Model Parameters:
 MAX_QUERY_SEQUENCE_LENGTH = 30
 MAX_TABLE_SEQUENCE_LENGTH = 200
 MAX_TABLE_NB_WORDS = 60000
@@ -29,13 +32,17 @@ hidden_unit_query = 100
 hidden_unit_table = 100
 batch_size = 512
 dropout_keep_prob = .8
+######
 num_epochs = 10
-learning_rate = 1e-2
+starter_learning_rate = 1e-2
 learning_rate_div = 2
 stop_threshold = .01
+decade_every = 3000
 save_every = 500
+show_stats_every = 100
 logs_path = '/tmp/tensorflow_logs/' + MODEL_BASE + '/' + time.strftime("%d-%m-%Y")
 chunk_size = batch_size * 10
+
 ################### Table and Query Dictionary and Embedding Generation ################
 ########################################################################################
 print('Indexing word vectors.')
@@ -44,23 +51,22 @@ print('Found %s word vectors.' % len(embeddings_index))
 
 # second, prepare text samples and their labels
 print('Processing text dataset')
-input_iterator= parse_input(TEXT_DATA, chunk_size)
+input_iterator= parse_input(TRAIN_DATA, chunk_size)
 
 # finally, vectorize the text samples into a 2D integer tensor
 query_tokenizer = Tokenizer(MAX_QUERY_NB_WORDS, MAX_QUERY_SEQUENCE_LENGTH)
 query_word_dict = query_tokenizer.gen_dict(input_iterator, column = 'query')
 print('done creating query word_dict!')
 print('Found %s unique tokens.' % len(query_word_dict))
-#query_sequences = query_tokenizer.tokenize_texts(input_iterator, column = 'query')
 ## Reset the iterator:
-input_iterator= parse_input(TEXT_DATA, chunk_size)
+input_iterator= parse_input(TRAIN_DATA, chunk_size)
 table_tokenizer = Table_Tokenizer(MAX_TABLE_NB_WORDS, MAX_TABLE_SEQUENCE_LENGTH)
 table_word_dict = table_tokenizer.gen_dict(input_iterator, column = 'table')
 print('done creating table word_dict!')
 print('Found %s unique tokens.' % len(table_word_dict))
-#table_sequences = table_tokenizer.tokenize_texts(input_iterator, column ='table')
-print('Preparing query embedding matrix.')
+
 # prepare embedding matrix
+print('Preparing query embedding matrix.')
 count_existent = 0
 query_nb_words = min(MAX_QUERY_NB_WORDS, len(query_word_dict))
 query_embedding_matrix = np.zeros((query_nb_words + 1, QUERY_EMBEDDING_DIM),dtype=np.float32)
@@ -160,16 +166,10 @@ with graph.as_default():
 			dropout_keep_prob = dropout_keep_prob)
 
 		global_step = tf.Variable(0, name='global_step', trainable=False)
+		learning_rate = tf.train.exponential_decay(starter_learning_rate, global_step, decade_every, 0.5, staircase=True)
 		optimizer = tf.train.RMSPropOptimizer(learning_rate, decay=0.9)
 		grads_and_vars = optimizer.compute_gradients(model.loss)
 		train_op = optimizer.apply_gradients(grads_and_vars, global_step=global_step)
-
-		# Checkpoint files will be saved in this directory during training
-		# checkpoint_dir = './checkpoints_' + timestamp + '/'
-		# if os.path.exists(checkpoint_dir):
-		# 	shutil.rmtree(checkpoint_dir)
-		# os.makedirs(checkpoint_dir)
-		# checkpoint_prefix = os.path.join(checkpoint_dir, 'model')
 
 		def train_step(x_query_batch, x_table_batch, y_batch):
 			feed_dict = {
@@ -179,15 +179,15 @@ with graph.as_default():
 			}
 			_, step, loss, accuracy, summary = sess.run([train_op, global_step, model.loss, model.accuracy, model.summary], feed_dict)
 			return _, step, loss, accuracy, summary
-		def dev_step(x_batch, y_batch):
+		def dev_step(x_query_batch, x_table_batch, y_batch):
 			feed_dict = {
-				model.input_x: x_query_batch,
+				model.input_query: x_query_batch,
 				model.input_table: x_table_batch,
 				model.input_y: y_batch,
 			}
-			step, loss, accuracy, num_correct, predictions = sess.run(
-				[global_step, model.loss, model.accuracy, model.num_correct, model.predictions], feed_dict)
-			return accuracy, loss, num_correct, predictions
+			loss, accuracy, num_correct, predictions,current_learning_rate = sess.run(
+				[model.loss, model.accuracy, model.num_correct, model.predictions,optimizer._learning_rate], feed_dict)
+			return accuracy, loss, num_correct, predictions, current_learning_rate
 
 		saver = tf.train.Saver(tf.all_variables(), max_to_keep = None)
 		sess.run(tf.initialize_all_variables())
@@ -196,32 +196,66 @@ with graph.as_default():
 		best_accuracy, best_at_step = 0, 0
 		prev_epoch_loss = sys.maxint
 		num_batches = 0
+
 		# Train the model with x_train and y_train
 		for epoch in range(num_epochs):
-			input_iterator_tables= parse_input(TEXT_DATA, chunk_size)
-			table_sequences = table_tokenizer.tokenize_texts(input_iterator_tables, column ='table')
-			input_iterator_queries= parse_input(TEXT_DATA, chunk_size)
-			query_sequences = query_tokenizer.tokenize_texts(input_iterator_queries, column ='query')
-			input_iterator_labels= parse_input(TEXT_DATA, chunk_size)
-			lables_sequences = get_labels(input_iterator_labels,'label')
+			
+			query_sequences_train, table_sequences_train, lables_sequences_train = get_iters(TRAIN_DATA, chunk_size,query_tokenizer,table_tokenizer)
+		
 			batch_index = 0
 			curr_epoch_loss = 0
-
+			total_samples = 0
+			total_positive_samples = 0
+			
 			while True:
 				try:
-					table_chunk = table_sequences.next()
-					query_chunk = query_sequences.next()
-					lable_chunk = lables_sequences.next()
+					table_chunk = table_sequences_train.next()
+					query_chunk = query_sequences_train.next()
+					lable_chunk = lables_sequences_train.next()
+
 					train_zipped = zip(query_chunk, table_chunk, lable_chunk)
+					
 					for train_batch in chunks(train_zipped, batch_size):
+						total_samples += batch_size
 						batch_index +=1
 						queries_train_batch, tables_train_batch, y_train_batch = zip(*train_batch)
 						_, step, loss, accuracy, summary = train_step(queries_train_batch, tables_train_batch, y_train_batch)
-						print 'epoch:%d, batch:%d, loss:%f, accuracy:%f'% (epoch,batch_index,loss,accuracy)
+						
+						if batch_index > 0 and batch_index % show_stats_every == 0:
+							print 'epoch:%d, batch:%d, loss:%f, accuracy:%f'% (epoch,batch_index,loss,accuracy)
 						current_step = tf.train.global_step(sess, global_step)
 						curr_epoch_loss += loss
 						summary_writer.add_summary(summary, epoch * num_batches + batch_index)
+						total_positive_samples += np.sum(y_train_batch,0)[1]
+
 						if batch_index > 0 and batch_index % save_every == 0:
+							query_sequences_dev, table_sequences_dev, lables_sequences_dev = get_iters(DEV_DATA, chunk_size,query_tokenizer,table_tokenizer)
+							sum_accuracy_dev = 0
+							num_dev_batches = 0
+							sum_loss_dev = 0
+							total_samples_dev = 0
+							total_positive_samples_dev = 0
+
+							while True:
+								try:
+									table_chunk_dev = table_sequences_dev.next()
+									query_chunk_dev = query_sequences_dev.next()
+									lable_chunk_dev = lables_sequences_dev.next()
+									dev_zipped = zip(query_chunk_dev, table_chunk_dev, lable_chunk_dev)
+
+									for dev_batch in chunks(dev_zipped, batch_size):
+										queries_dev_batch, tables_dev_batch, y_dev_batch = zip(*dev_batch)
+										accuracy, loss, num_correct, predictions, current_learning_rate= dev_step(queries_dev_batch, tables_dev_batch, y_dev_batch)
+										sum_accuracy_dev += accuracy
+										sum_loss_dev += loss
+										num_dev_batches += 1
+										total_samples_dev += batch_size
+										total_positive_samples_dev += np.sum(y_dev_batch,0)[1]
+
+								except StopIteration:
+									break
+							print '[Inference] epoch:%d, loss:%f, accuracy:%f, total samples:%d, total pos:%d' % (epoch,sum_loss_dev / num_dev_batches,sum_accuracy_dev / num_dev_batches, total_samples_dev, total_positive_samples_dev)
+ 
 							## Do evaluation and save the model:
 							saver.save(sess, save_dirpath + 'model',global_step=epoch * num_batches + batch_index)
 
@@ -252,6 +286,6 @@ with graph.as_default():
 				print 'stop criteria achieved!'
 				break
 			prev_epoch_loss = curr_epoch_loss
-			print 'Epoch Average Loss:%f' % (curr_epoch_loss)
+			print 'Epoch Average Loss:%f, Total samples:%d, Total pos samples:%d' % (curr_epoch_loss, total_samples, total_positive_samples)
 		logging.critical('Training is complete, testing the best model on x_test and y_test')
 ###############################################################

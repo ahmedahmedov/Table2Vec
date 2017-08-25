@@ -36,6 +36,15 @@ def parse_input(texts_file_path,chunk_size = 1000):
 		tables = chunk['table']
 		yield {'query':queries,'table':tables,'label':labels}
 
+def get_iters(data_source, chunk_size,query_tokenizer,table_tokenizer):
+	input_iterator_tables= parse_input(data_source, chunk_size)
+	table_sequences = table_tokenizer.tokenize_texts(input_iterator_tables, column ='table')
+	input_iterator_queries= parse_input(data_source, chunk_size)
+	query_sequences_dev = query_tokenizer.tokenize_texts(input_iterator_queries, column ='query')
+	input_iterator_labels= parse_input(data_source, chunk_size)
+	lables_sequences = get_labels(input_iterator_labels,'label')
+	return (query_sequences_dev, table_sequences, lables_sequences)
+
 def fit_tokenizer(texts, MAX_NB_WORDS):
 	tokenizer = Tokenizer(nb_words=MAX_NB_WORDS)
 	tokenizer.fit_on_texts(texts)
@@ -183,6 +192,7 @@ def save_model_summary(model, filename):
     f.close()
     return filename
 
+
 def get_AGI_encoder_vector(queries, url="http://agi-encoder:5001/encoder", batch_size=2000, report_interval=1):
     """
     Sequentially call encoder API at `url` with iterable `queries` returing a list of
@@ -217,7 +227,6 @@ def chunks(l, n):
     """Yield successive n-sized chunks from l."""
     for i in range(0, len(l), n):
     	if (i+n) <= len(l):
-			print 'chunk range:[%d,%d]' % (i, i+n)
 			yield l[i:i + n]
 
 def retrieve_AGI_vectors(input_file_name, output_file_name, input_headers):

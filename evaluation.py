@@ -17,7 +17,7 @@ BASE_DIR = 'Data'
 EMBEDDING_BASE = '/home/max/DeepLearning/DeepTables/private/Keras/WordEmbeddings'
 tmp_dir = 'tmp/'
 GLOVE_DIR = EMBEDDING_BASE + '/Glove/'
-TEXT_DATA = BASE_DIR + '/' + 'Sample_Q_Table_10k.tsv'
+TEXT_DATA = BASE_DIR + '/' + 'Q_Table_2Mil.tsv'
 
 ## Load embedding matrices and tokenizers:
 with open(tmp_dir + 'table_embedding_matrix.pickle', 'rb') as input_file:
@@ -86,8 +86,8 @@ with tf.Graph().as_default():
 
 		#checkpoint_file = trained_dir + 'best_model.ckpt'
 		saver = tf.train.Saver(tf.all_variables())
-		saver = tf.train.import_meta_graph('./Models_Sample_Q_Table/18-08-2017_9/model-18.meta')
-		saver.restore(sess, tf.train.latest_checkpoint('./Models_Sample_Q_Table/18-08-2017_9/'))
+		saver = tf.train.import_meta_graph('./Models_Sample_Q_Table_10k/18-08-2017/model-36.meta')
+		saver.restore(sess, tf.train.latest_checkpoint('./Models_Sample_Q_Table_10k/18-08-2017/'))
 		logging.critical('model has been loaded')
 
 		while True:

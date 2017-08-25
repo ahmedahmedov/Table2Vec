@@ -224,3 +224,4 @@ class Table_Tokenizer:
 
 	def isNaN(self,num):
 		return num != num
+
