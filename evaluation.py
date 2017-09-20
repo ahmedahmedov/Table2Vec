@@ -17,7 +17,7 @@ BASE_DIR = 'Data'
 EMBEDDING_BASE = '/home/max/DeepLearning/DeepTables/private/Keras/WordEmbeddings'
 tmp_dir = 'tmp/'
 GLOVE_DIR = EMBEDDING_BASE + '/Glove/'
-TEXT_DATA = BASE_DIR + '/' + 'Q_Table_2Mil.tsv'
+TEXT_DATA = BASE_DIR + '/' + 'Q_T_Dev.tsv'
 
 ## Load embedding matrices and tokenizers:
 with open(tmp_dir + 'table_embedding_matrix.pickle', 'rb') as input_file:
@@ -49,15 +49,14 @@ input_iterator_queries= parse_input(TEXT_DATA, chunk_size)
 query_sequences = query_tokenizer.tokenize_texts(input_iterator_queries, column ='query')
 input_iterator_labels= parse_input(TEXT_DATA, chunk_size)
 lables_sequences = get_labels(input_iterator_labels,'label')
-## Perform inference:
-
-
 
 
 #def predict_unseen_data():
 with tf.Graph().as_default():
 	session_conf = tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)
 	sess = tf.Session(config=session_conf)
+	tf.set_random_seed(198609)
+
 	with sess.as_default():
 		model = TableQuerySimModel(
 			query_embedding_mat = query_embedding_matrix,
@@ -85,9 +84,8 @@ with tf.Graph().as_default():
 			return accuracy, loss, num_correct, predictions
 
 		#checkpoint_file = trained_dir + 'best_model.ckpt'
-		saver = tf.train.Saver(tf.all_variables())
-		saver = tf.train.import_meta_graph('./Models_Sample_Q_Table_10k/18-08-2017/model-36.meta')
-		saver.restore(sess, tf.train.latest_checkpoint('./Models_Sample_Q_Table_10k/18-08-2017/'))
+		saver = tf.train.Saver(tf.global_variables())
+		saver.restore(sess, './Models_Q_Tables_2Mil/18-09-2017/model-16680')
 		logging.critical('model has been loaded')
 
 		while True:
@@ -95,12 +93,24 @@ with tf.Graph().as_default():
 				table_chunk = table_sequences.next()
 				query_chunk = query_sequences.next()
 				lable_chunk = lables_sequences.next()
-				train_zipped = zip(query_chunk, table_chunk, lable_chunk)
-				for train_batch in chunks(train_zipped, batch_size):
-					queries_train_batch, tables_train_batch, y_train_batch = zip(*train_batch)
-					accuracy, loss, num_correct, predictions = predict_step(queries_train_batch, tables_train_batch, y_train_batch)
+				zipped = zip(query_chunk, table_chunk, lable_chunk)
+				sum_accuracy = 0
+				sum_loss = 0
+				num_batches = 0
+				total_samples = 0
+				total_positive_samples = 0
+
+				for batch in chunks(zipped, batch_size):
+					queries_batch, tables_batch, y_batch = zip(*batch)
+					accuracy, loss, num_correct, predictions = predict_step(queries_batch, tables_batch, y_batch)
+					sum_accuracy += accuracy
+					sum_loss += loss
+					num_batches += 1
+					total_samples+= batch_size
+					total_positive_samples += np.sum(y_batch,0)[1]
 					print 'accuracy:%f, loss:%f, num_correct:%f'% (accuracy,loss,num_correct)
 			except StopIteration:
+				print '[Inference] Averages: accuracy:%f, loss:%f, total samples:%d, total pos:%d' % (sum_accuracy / num_batches, sum_loss / num_batches, total_samples, total_positive_samples)
 				break
 		# predictions, predict_labels = [], []
 		# for x_batch in batches:

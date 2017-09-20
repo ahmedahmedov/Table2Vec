@@ -16,7 +16,7 @@ import sys
 
 BASE_DIR = 'Data'
 EMBEDDING_BASE = '/home/max/DeepLearning/DeepTables/private/Keras/WordEmbeddings'
-MODEL_BASE = 'Models_Q_Tables_2Mil'
+MODEL_BASE = 'Models_Sample_Q_Table'
 tmp_dir = 'tmp/'
 GLOVE_DIR = EMBEDDING_BASE + '/Glove/'
 TRAIN_DATA = BASE_DIR + '/' + 'Q_Tables_2Mil.tsv'
@@ -33,13 +33,13 @@ hidden_unit_table = 100
 batch_size = 512
 dropout_keep_prob = .8
 ######
-num_epochs = 10
+num_epochs = 2
 starter_learning_rate = 1e-2
 learning_rate_div = 2
 stop_threshold = .01
 decade_every = 3000
-save_every = 500
-show_stats_every = 100
+save_every = 100
+show_stats_every = 10
 logs_path = '/tmp/tensorflow_logs/' + MODEL_BASE + '/' + time.strftime("%d-%m-%Y")
 chunk_size = batch_size * 10
 
@@ -189,6 +189,14 @@ with graph.as_default():
 				[model.loss, model.accuracy, model.num_correct, model.predictions,optimizer._learning_rate], feed_dict)
 			return accuracy, loss, num_correct, predictions, current_learning_rate
 
+		with tf.name_scope('epoch_summary'):
+			inference_accuracy = tf.Variable(0.0)
+			inference_loss = tf.Variable(0.0)
+			inference_lr = tf.Variable(0.0)
+			inference_accuracy_summary = tf.summary.scalar("inference_accuracy", inference_accuracy)
+			inference_loss_summary = tf.summary.scalar("inference_loss", inference_loss)
+			inference_lr_summary = tf.summary.scalar("inference_learning_rate", inference_lr)
+			epoch_summary_op = tf.summary.merge([inference_accuracy_summary,inference_loss_summary,inference_lr_summary])
 		saver = tf.train.Saver(tf.all_variables(), max_to_keep = None)
 		sess.run(tf.initialize_all_variables())
 
@@ -255,10 +263,13 @@ with graph.as_default():
 								except StopIteration:
 									break
 							print '[Inference] epoch:%d, loss:%f, accuracy:%f, total samples:%d, total pos:%d' % (epoch,sum_loss_dev / num_dev_batches,sum_accuracy_dev / num_dev_batches, total_samples_dev, total_positive_samples_dev)
- 
+ 							epoch_summary = sess.run(epoch_summary_op,{inference_loss:sum_loss_dev / num_dev_batches,
+						 											inference_accuracy:sum_accuracy_dev / num_dev_batches,
+						 											inference_lr:current_learning_rate})
+ 							summary_writer.add_summary(epoch_summary,epoch * num_batches + batch_index)
 							## Do evaluation and save the model:
-							saver.save(sess, save_dirpath + 'model',global_step=epoch * num_batches + batch_index)
-
+							saved_path = saver.save(sess, save_dirpath + 'model',global_step=epoch * num_batches + batch_index)
+							print 'saved_path:' + saved_path
 						# Evaluate the model with x_dev and y_dev
 						# if current_step % params['evaluate_every'] == 0:
 						# 	dev_batches = data_helper.batch_iter(list(zip(x_dev, y_dev)), params['batch_size'], 1)
